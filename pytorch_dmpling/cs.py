@@ -1,5 +1,5 @@
 import numpy as np
-
+import torch
 
 class CanonicalSystem:
     def __init__(self, a, T, dt):
@@ -7,7 +7,7 @@ class CanonicalSystem:
         self.T = T
         self.dt = dt
 
-        self.time = np.arange(0, T, dt)
+        self.time = torch.arange(0, T, dt)
         self.N = self.time.shape[0]
 
         self.theta = None
@@ -21,7 +21,4 @@ class CanonicalSystem:
         return self.theta
 
     def all_steps(self, tau=1.0):
-        return np.array([self.step(tau) for _ in range(self.N)])
-
-    # def step_(self):
-    #     self.theta = np.exp(-self.a * self.dt) * self.theta
+        return torch.tensor([self.step(tau) for _ in range(self.N)])

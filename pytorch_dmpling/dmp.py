@@ -1,24 +1,26 @@
 import numpy as np
-from dmpling.cs import CanonicalSystem
-from dmpling import utils
-
+import torch
+from pytorch_dmpling.cs import CanonicalSystem
+from pytorch_dmpling import utils
 
 class DMP:
-    def __init__(self, T, dt, a=150, b=25, n_bfs=10):
+    def __init__(self, T, dt, a=150, b=25, w=None, device=torch.device("cpu")):
         self.T = T
         self.dt = dt
         self.y0 = 0.0
         self.g = 1.0
         self.a = a
         self.b = b
-        self.n_bfs = n_bfs
+        self.n_bfs = w.shape[1]
+
+        self.device = device
 
         # canonical system
         a = 1.0
         self.cs = CanonicalSystem(a, T, dt)
 
         # initialize basis functions for LWR
-        self.w = np.zeros(n_bfs)
+        self.w = w.to(self.device)
         self.centers = None
         self.widths = None
         self.set_basis_functions()
@@ -46,15 +48,13 @@ class DMP:
         self.cs.reset()
 
     def set_basis_functions(self):
-        time = np.linspace(0, self.T, self.n_bfs)
-        self.centers = np.zeros(self.n_bfs)
-        self.centers = np.exp(-self.cs.a * time)
-        self.widths = np.ones(self.n_bfs) * self.n_bfs ** 1.5 / self.centers / self.cs.a
+        time = torch.linspace(0, self.T, self.n_bfs).to(self.device)
+        self.centers = torch.zeros(self.n_bfs).to(self.device)
+        self.centers = torch.exp(-self.cs.a * time).to(self.device)
+        self.widths = torch.ones(self.n_bfs).to(self.device) * self.n_bfs ** 1.5 / self.centers / self.cs.a
 
     def psi(self, theta):
-        if isinstance(theta, np.ndarray):
-            theta = theta[:, None]
-        return np.exp(-self.widths * (theta - self.centers) ** 2)
+        return torch.exp(-self.widths * (theta - self.centers) ** 2)
 
     def step(self, tau=1.0, k=1.0, start=None, goal=None):
         if goal is None:
@@ -70,7 +70,7 @@ class DMP:
         theta = self.cs.step(tau)
         psi = self.psi(theta)
 
-        f = np.dot(self.w, psi) * theta * k * (g - y0) / np.sum(psi)
+        f = torch.matmul(self.w, psi) * theta * k * (g - y0) / torch.sum(psi).item()
 
         self.zd = self.a * (self.b * (g - self.y) - self.z) + f  # transformation system
         self.zd /= tau
@@ -92,8 +92,8 @@ class DMP:
         f_target = tau**2 * ydd_demo - self.a * (self.b * (self.g - y_demo) - tau * yd_demo)
         f_target /= (self.g - self.y0)
 
-        theta_seq = self.cs.all_steps()
-        psi_funs = self.psi(theta_seq)
+        theta_seq = self.cs.all_steps().numpy()
+        psi_funs = self.psi(theta_seq).numpy()
 
         # Locally Weighted Regression
         aa = np.multiply(theta_seq.reshape((1, theta_seq.shape[0])), psi_funs.T)
@@ -102,13 +102,13 @@ class DMP:
 
         bb = np.multiply(theta_seq.reshape((1, theta_seq.shape[0])) ** 2, psi_funs.T)
         bb = np.sum(bb, axis=1)
-        self.w = aa / bb
+        self.w = torch.from_numpy(aa / bb)
 
         self.reset()
 
     def run_sequence(self, tau=1.0, k=1.0, start=None, goal=None):
-        y = np.zeros(self.cs.N)
+        y = torch.zeros(self.w.shape[0],self.cs.N).to(self.device)
         y[0] = self.y0
         for i in range(self.cs.N):
-            y[i], _, _, _ = self.step(tau=tau, k=k, start=start, goal=goal)
+            y[:,i], _, _, _ = self.step(tau=tau, k=k, start=start, goal=goal)
         return y
